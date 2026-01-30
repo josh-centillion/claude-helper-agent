@@ -904,6 +904,457 @@ Output the refactored code in a code block.`;
     }
   );
 
+  // ==================== CODE QUALITY TOOLS ====================
+
+  // Tool: Lint code
+  server.registerTool(
+    'lint_code',
+    {
+      description: 'Analyze code for style issues, best practices, and potential improvements using AI-powered linting.',
+      inputSchema: {
+        code: z.string().describe('Code to lint'),
+        language: z.string().describe('Programming language (typescript, javascript, python, etc.)'),
+        rules: z.array(z.string()).optional().describe('Specific rules to check (e.g., ["no-unused-vars", "prefer-const"])'),
+      },
+    },
+    async ({ code, language, rules }) => {
+      const rulesList = rules?.length ? `Focus on these rules: ${rules.join(', ')}` : '';
+
+      const systemPrompt = `You are an expert code linter for ${language}. Analyze the code and report issues in this format:
+
+For each issue found:
+- **Line X**: [severity: error|warning|info] [rule-name] Description
+
+Categories to check:
+1. **Errors**: Syntax errors, type errors, undefined variables
+2. **Warnings**: Unused variables, deprecated APIs, potential bugs
+3. **Style**: Inconsistent formatting, naming conventions
+4. **Best Practices**: Modern syntax, performance, security
+
+${rulesList}
+
+End with a summary: X errors, Y warnings, Z style issues.
+If the code is clean, say "No issues found."`;
+
+      const result = await env.AI.run(env.LLM_MODEL as any, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: code },
+        ],
+        max_tokens: 2048,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: result.response || 'Failed to lint code',
+        }],
+      };
+    }
+  );
+
+  // Tool: Run tests (simulated via AI analysis)
+  server.registerTool(
+    'run_tests',
+    {
+      description: 'Analyze test files and predict test outcomes. Can also generate test cases for code.',
+      inputSchema: {
+        code: z.string().describe('Code to test OR test file content'),
+        mode: z.enum(['analyze', 'generate', 'coverage']).describe('analyze: predict test results, generate: create tests, coverage: identify untested code'),
+        test_framework: z.string().optional().describe('Test framework (jest, vitest, pytest, etc.)'),
+      },
+    },
+    async ({ code, mode, test_framework }) => {
+      const framework = test_framework || 'jest';
+
+      const prompts: Record<string, string> = {
+        analyze: `You are a test analyzer. Given this test file, predict which tests will pass or fail and why.
+For each test:
+- ✅ PASS: [test name] - reason
+- ❌ FAIL: [test name] - expected failure reason
+- ⚠️ SKIP: [test name] - reason if skipped
+
+End with: Expected: X pass, Y fail, Z skip`,
+
+        generate: `You are a test generator for ${framework}. Generate comprehensive test cases for this code.
+Include:
+1. Happy path tests
+2. Edge cases (empty inputs, nulls, boundaries)
+3. Error handling tests
+4. Integration points
+
+Output valid ${framework} test code with describe/it blocks.`,
+
+        coverage: `You are a test coverage analyzer. Identify untested code paths in this implementation.
+List:
+1. **Untested functions**: Functions with no apparent test coverage
+2. **Untested branches**: if/else paths not covered
+3. **Edge cases missing**: Boundary conditions not tested
+4. **Error paths**: Exception handling not tested
+
+Provide specific line numbers and suggest test cases for each gap.`,
+      };
+
+      const result = await env.AI.run(env.REASONING_MODEL as any, {
+        messages: [
+          { role: 'system', content: prompts[mode] },
+          { role: 'user', content: code },
+        ],
+        max_tokens: 4096,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            mode,
+            framework,
+            analysis: result.response,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // ==================== GITHUB TOOLS ====================
+
+  // Tool: Review PR
+  server.registerTool(
+    'review_pr',
+    {
+      description: 'Fetch and review a GitHub Pull Request. Provides code review feedback.',
+      inputSchema: {
+        owner: z.string().describe('Repository owner'),
+        repo: z.string().describe('Repository name'),
+        pr_number: z.number().describe('Pull request number'),
+        focus: z.enum(['security', 'performance', 'bugs', 'style', 'all']).optional().default('all').describe('Review focus area'),
+      },
+    },
+    async ({ owner, repo, pr_number, focus }) => {
+      if (!env.GITHUB_TOKEN) {
+        return {
+          content: [{ type: 'text', text: 'GitHub token not configured' }],
+          isError: true,
+        };
+      }
+
+      // Fetch PR details
+      const prResponse = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${pr_number}`,
+        {
+          headers: {
+            Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+            Accept: 'application/vnd.github.v3+json',
+          },
+        }
+      );
+
+      if (!prResponse.ok) {
+        return {
+          content: [{ type: 'text', text: `PR not found: ${owner}/${repo}#${pr_number}` }],
+          isError: true,
+        };
+      }
+
+      const pr = await prResponse.json() as any;
+
+      // Fetch PR diff
+      const diffResponse = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${pr_number}`,
+        {
+          headers: {
+            Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+            Accept: 'application/vnd.github.v3.diff',
+          },
+        }
+      );
+
+      const diff = await diffResponse.text();
+
+      // Fetch PR files for context
+      const filesResponse = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${pr_number}/files`,
+        {
+          headers: {
+            Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+            Accept: 'application/vnd.github.v3+json',
+          },
+        }
+      );
+
+      const files = await filesResponse.json() as any[];
+
+      const focusPrompts: Record<string, string> = {
+        security: 'Focus on security vulnerabilities: injection, auth issues, data exposure, secrets in code.',
+        performance: 'Focus on performance: N+1 queries, unnecessary loops, memory leaks, caching opportunities.',
+        bugs: 'Focus on bugs: logic errors, edge cases, null handling, race conditions.',
+        style: 'Focus on code style: naming, formatting, code organization, documentation.',
+        all: 'Provide comprehensive review covering security, performance, bugs, and style.',
+      };
+
+      const systemPrompt = `You are an expert code reviewer. Review this Pull Request.
+
+PR: ${pr.title}
+Author: ${pr.user.login}
+Files changed: ${files.length}
+Additions: +${pr.additions} Deletions: -${pr.deletions}
+
+${focusPrompts[focus || 'all']}
+
+Format your review as:
+## Summary
+Brief overview of the changes
+
+## Issues Found
+For each issue:
+- **[severity]** file:line - description
+  \`\`\`suggestion
+  suggested fix if applicable
+  \`\`\`
+
+## Approval Recommendation
+✅ APPROVE / ⚠️ REQUEST CHANGES / 💬 COMMENT
+
+Severities: 🔴 critical, 🟠 major, 🟡 minor, 🔵 nitpick`;
+
+      const result = await env.AI.run(env.REASONING_MODEL as any, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `PR Description:\n${pr.body || 'No description'}\n\nFiles:\n${files.map((f: any) => `- ${f.filename} (+${f.additions}/-${f.deletions})`).join('\n')}\n\nDiff:\n${diff.slice(0, 15000)}` },
+        ],
+        max_tokens: 4096,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            pr: {
+              number: pr_number,
+              title: pr.title,
+              author: pr.user.login,
+              url: pr.html_url,
+              files: files.length,
+              additions: pr.additions,
+              deletions: pr.deletions,
+            },
+            review: result.response,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // ==================== MULTI-FILE REFACTORING ====================
+
+  // Tool: Plan refactor
+  server.registerTool(
+    'plan_refactor',
+    {
+      description: 'Create a multi-file refactoring plan. Analyzes dependencies and suggests coordinated changes.',
+      inputSchema: {
+        goal: z.string().describe('Refactoring goal (e.g., "extract authentication into separate module")'),
+        project_id: z.string().describe('Project to refactor'),
+        entry_file: z.string().optional().describe('Starting file path for the refactor'),
+      },
+    },
+    async ({ goal, project_id, entry_file }) => {
+      // Get project context
+      const embedding = await env.AI.run(env.EMBEDDING_MODEL as any, { text: goal });
+
+      const results = await env.VECTORIZE.query(embedding.data[0], {
+        topK: 20,
+        filter: { project_id },
+        returnMetadata: 'all',
+      });
+
+      // Fetch relevant code chunks
+      const context = await Promise.all(
+        results.matches.map(async (match) => {
+          const chunk = await env.DB.prepare(
+            `SELECT c.content, f.relative_path
+             FROM chunks c
+             JOIN files f ON c.file_id = f.id
+             WHERE c.id = ?`
+          ).bind(match.id).first();
+          return chunk;
+        })
+      );
+
+      // Group by file
+      const fileMap = new Map<string, string[]>();
+      for (const chunk of context) {
+        if (!chunk) continue;
+        const path = (chunk as any).relative_path;
+        if (!fileMap.has(path)) fileMap.set(path, []);
+        fileMap.get(path)!.push((chunk as any).content);
+      }
+
+      const codeContext = Array.from(fileMap.entries())
+        .map(([path, chunks]) => `=== ${path} ===\n${chunks.join('\n...\n')}`)
+        .join('\n\n');
+
+      const systemPrompt = `You are an expert software architect. Create a detailed refactoring plan.
+
+Goal: ${goal}
+${entry_file ? `Starting point: ${entry_file}` : ''}
+
+Analyze the code and create a step-by-step plan:
+
+## Refactoring Plan
+
+### 1. Analysis
+- Current state summary
+- Dependencies identified
+- Risk assessment
+
+### 2. Files to Modify
+For each file:
+| File | Change Type | Description |
+|------|-------------|-------------|
+| path | create/modify/delete | what changes |
+
+### 3. Execution Order
+List files in order they should be changed (respecting dependencies):
+1. First: [file] - reason
+2. Then: [file] - reason
+...
+
+### 4. Code Changes
+For each file, show:
+\`\`\`diff
+- old code
++ new code
+\`\`\`
+
+### 5. Testing Strategy
+- What to test after each step
+- Rollback plan if issues
+
+### 6. Migration Notes
+- Breaking changes
+- Required updates to dependents`;
+
+      const result = await env.AI.run(env.REASONING_MODEL as any, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: codeContext },
+        ],
+        max_tokens: 8192,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            goal,
+            project_id,
+            files_analyzed: fileMap.size,
+            plan: result.response,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // Tool: Execute refactor step
+  server.registerTool(
+    'execute_refactor',
+    {
+      description: 'Execute a single step of a refactoring plan. Stages changes for review.',
+      inputSchema: {
+        project_id: z.string().describe('Project ID'),
+        file_path: z.string().describe('File to refactor'),
+        instruction: z.string().describe('Specific refactoring instruction for this file'),
+        related_files: z.array(z.string()).optional().describe('Other files that may need coordinated changes'),
+      },
+    },
+    async ({ project_id, file_path, instruction, related_files }) => {
+      // Get current file content
+      const chunks = await env.DB.prepare(
+        `SELECT c.content, c.start_line
+         FROM files f
+         JOIN chunks c ON f.id = c.file_id
+         WHERE f.project_id = ? AND f.relative_path = ?
+         ORDER BY c.start_line`
+      ).bind(project_id, file_path).all();
+
+      if (chunks.results.length === 0) {
+        return {
+          content: [{ type: 'text', text: `File not found: ${file_path}` }],
+          isError: true,
+        };
+      }
+
+      const currentContent = chunks.results.map((c: any) => c.content).join('\n');
+
+      // Get related file content if specified
+      let relatedContext = '';
+      if (related_files?.length) {
+        for (const relPath of related_files) {
+          const relChunks = await env.DB.prepare(
+            `SELECT c.content FROM files f JOIN chunks c ON f.id = c.file_id
+             WHERE f.project_id = ? AND f.relative_path = ? ORDER BY c.start_line`
+          ).bind(project_id, relPath).all();
+          if (relChunks.results.length > 0) {
+            relatedContext += `\n=== ${relPath} ===\n${relChunks.results.map((c: any) => c.content).join('\n')}`;
+          }
+        }
+      }
+
+      const systemPrompt = `You are a code refactoring assistant. Apply the requested change to the file.
+
+Instruction: ${instruction}
+
+Output ONLY the complete new file content, no explanations.
+Preserve all functionality unless explicitly asked to remove it.
+Maintain consistent style with the existing code.`;
+
+      const result = await env.AI.run(env.LLM_MODEL as any, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Current file (${file_path}):\n${currentContent}${relatedContext ? `\n\nRelated files for context:${relatedContext}` : ''}` },
+        ],
+        max_tokens: 8192,
+      });
+
+      const newContent = result.response || '';
+
+      // Stage the change
+      const artifactKey = `pending/${Date.now()}/${file_path}`;
+      await env.ARTIFACTS.put(artifactKey, newContent, {
+        customMetadata: {
+          path: file_path,
+          type: 'modify',
+          instruction,
+          timestamp: Date.now().toString(),
+        },
+      });
+
+      // Generate diff preview
+      const oldLines = currentContent.split('\n');
+      const newLines = newContent.split('\n');
+      const changes = {
+        additions: newLines.filter(l => !oldLines.includes(l)).length,
+        deletions: oldLines.filter(l => !newLines.includes(l)).length,
+      };
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            staged: true,
+            file: file_path,
+            artifact_key: artifactKey,
+            changes,
+            instruction,
+            message: 'Refactor staged. Use list_pending_changes to review, commit_changes to apply.',
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
   // ==================== BROWSER AUTOMATION TOOLS ====================
 
   // Tool: Browser navigate

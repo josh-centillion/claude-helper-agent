@@ -4,12 +4,12 @@
 
 - **Worker URL**: `https://claude-agents.nick-9a6.workers.dev`
 - **API Key**: `fe941f6eca5f8b6a86c6e7627fb286d2eec678d3988ebc6466c2fcb1fb1ed12c`
-- **Version**: 2.1.0
+- **Version**: 2.2.0
 
 ## What's Done
 
 - [x] Full agentic coding system deployed on Cloudflare Workers
-- [x] MCP server with 23 tools (code_search, read_file, browser_navigate, etc.)
+- [x] MCP server with 28 tools (code_search, read_file, browser_navigate, review_pr, etc.)
 - [x] API key authentication on /mcp AND /api endpoints
 - [x] GitHub token configured for commits/PRs
 - [x] CodingAgent Durable Object for stateful task orchestration
@@ -51,7 +51,7 @@ Add to `~/.claude/mcp.json`:
 }
 ```
 
-## MCP Tools Available (23 tools)
+## MCP Tools Available (28 tools)
 
 ### Code & Git Tools
 | Tool | Description |
@@ -76,6 +76,23 @@ Add to `~/.claude/mcp.json`:
 | `find_similar_code` | Find similar code across projects |
 | `suggest_refactor` | AI-powered refactoring suggestions |
 | `get_project_context` | Get relevant context for a task |
+
+### Code Quality Tools
+| Tool | Description |
+|------|-------------|
+| `lint_code` | AI-powered linting for any language |
+| `run_tests` | Analyze tests, generate tests, find coverage gaps |
+
+### GitHub Tools
+| Tool | Description |
+|------|-------------|
+| `review_pr` | Fetch and review PRs with AI feedback |
+
+### Multi-file Refactoring
+| Tool | Description |
+|------|-------------|
+| `plan_refactor` | Create multi-file refactoring plan |
+| `execute_refactor` | Execute refactor step, stage changes |
 
 ### Browser Automation Tools
 | Tool | Description |

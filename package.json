@@ -1,6 +1,6 @@
 {
   "name": "claude-agents",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Distributed agentic coding system with Claude CLI integration",
   "main": "src/index.ts",
   "scripts": {
