@@ -1,0 +1,54 @@
+name = "claude-agents"
+main = "src/index.ts"
+compatibility_date = "2026-01-29"
+compatibility_flags = ["nodejs_compat"]
+account_id = "9a672bc9fdb94006d556843ab468f894"
+
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "claude-agents-code"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "claude-agents-db"
+database_id = "2198e59a-7157-4532-9d80-4b7ef9759a75"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "a5b94a2b95dc429a80c24c5648fb513e"
+
+# R2 bucket for code artifacts, diffs, patches
+[[r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "claude-agents-artifacts"
+
+[vars]
+EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5"
+LLM_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+FAST_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
+REASONING_MODEL = "@cf/deepseek-ai/deepseek-r1-distill-llama-70b"
+
+[durable_objects]
+bindings = [
+  { name = "PROJECT_AGENTS", class_name = "ProjectAgent" },
+  { name = "CODING_AGENT", class_name = "CodingAgent" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ProjectAgent"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["CodingAgent"]
+
+# Browser Rendering for web automation
+[browser]
+binding = "BROWSER"
+
+# Cron trigger - runs daily at 6 AM UTC to check staleness
+[triggers]
+crons = ["0 6 * * *"]

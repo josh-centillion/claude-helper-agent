@@ -1,0 +1,28 @@
+{
+  "name": "claude-agents",
+  "version": "2.1.0",
+  "description": "Distributed agentic coding system with Claude CLI integration",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute claude-agents-db --file=schema.sql",
+    "db:init:local": "wrangler d1 execute claude-agents-db --local --file=schema.sql",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["cloudflare", "workers", "agents", "ai", "mcp", "claude"],
+  "author": "Josh Martin",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "agents": "^0.3.6",
+    "@cloudflare/puppeteer": "^1.0.5",
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260129.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.61.1"
+  }
+}

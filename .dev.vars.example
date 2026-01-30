@@ -1,0 +1,10 @@
+# Local development secrets
+# Copy this to .dev.vars and fill in values (never commit .dev.vars!)
+
+# Required: API key for MCP endpoint authentication
+# Generate with: openssl rand -hex 32
+API_KEY=your-api-key-here
+
+# Optional: GitHub Personal Access Token (needs 'repo' scope)
+# Create at: https://github.com/settings/tokens
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
